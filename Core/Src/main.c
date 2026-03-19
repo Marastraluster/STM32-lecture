@@ -18,14 +18,16 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "key.h"
+#include "led.h"
 #include "stm32f4xx.h"
 #include "stm32f4xx_hal_gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 #include "oled.h"
 #include "music.h"
+#include <stdint.h>
 #include <stdio.h>
 
 /* USER CODE END Includes */
@@ -79,9 +81,44 @@ static void MX_ADC1_Init(void);
 /* USER CODE BEGIN 0 */
 
 static const Music_Tone g_boot_melody[] = {
-  {NOTE_M1, 180}, {NOTE_M2, 180}, {NOTE_M3, 180}, {NOTE_M4, 180},
-  {NOTE_M5, 180}, {NOTE_M6, 180}, {NOTE_M7, 180}, {NOTE_H1, 260}
+  {NOTE_M1, 180u}, {NOTE_M2, 180u}, {NOTE_M3, 180u}, {NOTE_M4, 180u},
+  {NOTE_M5, 180u}, {NOTE_M6, 180u}, {NOTE_M7, 180u}, {NOTE_H1, 260u}
 };
+
+static uint8_t g_oled_ready = 0u;
+
+/**
+  * @brief 实时刷新 OLED 上的流水灯状态信息。
+  * @param None
+  * @retval None
+  */
+static void App_OLED_ShowLedStatus(void)
+{
+  char line[24];
+  const char *dir_text;
+
+  if (g_oled_ready == 0u)
+  {
+    return;
+  }
+
+  dir_text = (LED_GetDirection() == LED_DIR_FORWARD) ? "FORWARD" : "REVERSE";
+
+  OLED_Clear();
+  OLED_SetCursor(0, 0);
+  snprintf(line, sizeof(line), "SPD:%uMS", (unsigned)LED_GetStepMs());
+  OLED_WriteString(line);
+
+  OLED_SetCursor(0, 1);
+  snprintf(line, sizeof(line), "DIR:%s", dir_text);
+  OLED_WriteString(line);
+
+  OLED_SetCursor(0, 2);
+  snprintf(line, sizeof(line), "RUN:%s", LED_IsRunning() ? "ON" : "OFF");
+  OLED_WriteString(line);
+
+  (void)OLED_UpdateScreenDMA();
+}
 
 /* USER CODE END 0 */
 
@@ -148,6 +185,8 @@ int main(void)
       OLED_WriteString(line);
       OLED_UpdateScreenDMA();
     }
+
+    g_oled_ready = 1u;
   }
 
   if (Music_Init(&htim3, TIM_CHANNEL_1) == HAL_OK)
@@ -157,38 +196,38 @@ int main(void)
                             50u);
   }
 
+  if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
   /* USER CODE END 2 */
+
+  LED_Init();
+  App_OLED_ShowLedStatus();
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t led_index = 0;
-  uint32_t led_tick = HAL_GetTick();
   while (1)
   {
+    uint8_t key = Key_Scan();
     /* USER CODE END WHILE */
-    Music_Task();
+    LED_Task();
 
-    if ((HAL_GetTick() - led_tick) >= 120u)
+    if (key == KEY_1)
     {
-      led_tick = HAL_GetTick();
-
-      HAL_GPIO_WritePin(GPIOE,
-        L1_Pin | L2_Pin | L3_Pin | L4_Pin | L5_Pin | L6_Pin | L7_Pin | L8_Pin,
-        GPIO_PIN_RESET);
-
-      switch (led_index)
-      {
-        case 0: HAL_GPIO_TogglePin(L1_GPIO_Port, L1_Pin); break;
-        case 1: HAL_GPIO_TogglePin(L2_GPIO_Port, L2_Pin); break;
-        case 2: HAL_GPIO_TogglePin(L3_GPIO_Port, L3_Pin); break;
-        case 3: HAL_GPIO_TogglePin(L4_GPIO_Port, L4_Pin); break;
-        case 4: HAL_GPIO_TogglePin(L5_GPIO_Port, L5_Pin); break;
-        case 5: HAL_GPIO_TogglePin(L6_GPIO_Port, L6_Pin); break;
-        case 6: HAL_GPIO_TogglePin(L7_GPIO_Port, L7_Pin); break;
-        default: HAL_GPIO_TogglePin(L8_GPIO_Port, L8_Pin); break;
-      }
-
-      led_index = (uint8_t)((led_index + 1u) % 8u);
+      LED_ToggleRun();
+      App_OLED_ShowLedStatus();
+    }
+    else if (key == KEY_2)
+    {
+      LED_CycleSpeedPreset();
+      App_OLED_ShowLedStatus();
+    }
+    else if (key == KEY_3)
+    {
+      LED_ToggleDirection();
+      App_OLED_ShowLedStatus();
     }
     /* USER CODE BEGIN 3 */
   }
@@ -341,9 +380,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 15999;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 0;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -504,6 +543,19 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief TIM 周期中断回调。
+  * @param htim 触发中断的定时器句柄。
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM2)
+  {
+    Key_TimerScan1ms();
+  }
+}
 
 /* USER CODE END 4 */
 
